@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "northstar-leave-assistant"
+version = "1.0.0"
+description = "Northstar Services HR assistant: MCP leave server, RAG over company policies and a Georgian CLI."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "sqlalchemy>=2.0.30",
+    "psycopg2-binary>=2.9.9",
+    "pgvector>=0.3.0",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "python-dotenv>=1.0",
+    "mcp>=1.10",
+    "google-genai>=1.20",
+    "python-docx>=1.1",
+    "pymupdf>=1.24",
+    "rich>=13.7",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    # Embedded PostgreSQL + pgvector used only as a disposable database for the test
+    # suite when TEST_DATABASE_URL is not set. The application itself runs on Supabase.
+    "pgserver>=0.1.4",
+]
+
+[project.scripts]
+northstar-cli = "northstar.cli.app:main"
+northstar-mcp = "northstar.mcp.server:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "."]
+addopts = "-ra"
+markers = [
+    "db: test needs a PostgreSQL database (TEST_DATABASE_URL or embedded pgserver)",
+]

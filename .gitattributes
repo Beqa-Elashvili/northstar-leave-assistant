@@ -1,0 +1,4 @@
+# Supplied source files must stay byte-identical: never normalise line endings.
+data/** -text
+documents/** binary
+tests/fixtures/source_checksums.sha256 -text

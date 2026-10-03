@@ -1,4 +1,4 @@
-# Architecture (Phase 1 design)
+# Architecture
 
 ```
                      ┌──────────────────────┐
@@ -48,12 +48,14 @@ src/northstar/
   clock.py         business date provider (APP_TODAY) – get_app_today()
   database/        engine (search_path), ORM models, migration runner, repositories
   domain/          enums, value objects, typed errors (with policy article + Georgian message)
-  services/        LeaveDayCalculator, BalanceService, LeaveRequestService, ProposalService
-  policies/        rule validators (probation, notice, max length, AUD periods, overlap, …)
-  mcp/             MCP server (tools + typed schemas), auth context, MCP client wrapper
+  services/        LeaveDayCalculator, BalanceService, LeaveRuleService, LeaveService (propose/confirm/HR
+                   decisions), authorization (Principal, verify_principal, require_hr)
+  policies/        pure rule functions (probation, notice, 15-day limit, AUD periods, overlap, sick, unpaid, …)
+  mcp/             MCP server (typed tools, error payloads, --role/--employee-id start-up identity)
   rag/             DOCX/PDF extraction, structural chunking, embeddings, hybrid retrieval
-  agent/           LLM provider abstraction, intent routing, conversation state, Georgian replies
-  cli/             interactive terminal UI
+  agent/           LLM provider (LLMProvider → GeminiProvider), intent extraction, MCP tool client
+                   (allow-list), policy Q&A, conversation state, Georgian formatting
+  cli/             interactive terminal UI; starts the MCP server as a stdio subprocess
 migrations/        versioned SQL (source of truth for DDL)
 scripts/           migrate, seed_database, ingest_documents, check_setup
 ```

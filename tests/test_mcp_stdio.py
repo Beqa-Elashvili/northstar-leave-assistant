@@ -32,8 +32,9 @@ def test_stdio_employee_session(seeded_engine, db_url, db_schema):
             proposal = (await client.call_tool("propose_leave_request", {
                 "conversation_id": str(uuid.uuid4()), "leave_type": "ANNUAL",
                 "start_date": "2026-10-27", "end_date": "2026-10-30"})).structured_content
-            created = (await client.call_tool("create_leave_request",
-                                              {"proposal_id": proposal["proposal_id"]})).structured_content
+            created = (await client.call_tool("create_leave_request", {
+                "leave_type": "ANNUAL", "start_date": "2026-10-27", "end_date": "2026-10-30",
+                "proposal_id": proposal["proposal_id"]})).structured_content
             return tools, profile, balance, denied, created
 
     tools, profile, balance, denied, created = anyio.run(go)

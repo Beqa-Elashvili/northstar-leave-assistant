@@ -65,7 +65,7 @@ def ingest_test_documents(engine) -> Retriever:
     return Retriever(factory, provider)
 
 
-def converse(engine, retriever: Retriever, llm, messages: list[str], employee_id: str = "E1001",
+def converse(engine, retriever: Retriever, llm, messages: list, employee_id: str = "E1001",
              ) -> tuple[list[AgentReply], HRAgent]:
     """Run one conversation through a real MCP client/server pair (in-memory transport)."""
 
@@ -75,6 +75,12 @@ def converse(engine, retriever: Retriever, llm, messages: list[str], employee_id
         async with Client(server) as client:
             agent = HRAgent(McpLeaveTools(client), llm, PolicyAnswerer(retriever, llm), CLOCK.today())
             await agent.start()
-            return [await agent.handle(m) for m in messages], agent
+            replies = []
+            for m in messages:
+                if callable(m):  # a step between messages, e.g. data changing behind the conversation
+                    await anyio.to_thread.run_sync(m)
+                else:
+                    replies.append(await agent.handle(m))
+            return replies, agent
 
     return anyio.run(go)

@@ -120,8 +120,8 @@ class ConversationState:
     employee_name: str | None = None
     draft: LeaveDraft | None = None
     awaiting: Awaiting = Awaiting.NOTHING
-    proposal_id: str | None = None
-    last_created_proposal_id: str | None = None
+    proposal: dict | None = None                 # the summary currently shown, as returned by the server
+    last_created_proposal: dict | None = None    # for repeated "დიახ" (idempotent re-confirmation)
     last_reply: str = ""
 
     def summary(self) -> str:
@@ -130,7 +130,7 @@ class ConversationState:
             f"type={d.leave_type} (confirmed={d.type_confirmed}), start={d.start_date}, end={d.end_date}, "
             f"reason={'given' if d.reason else 'none'}")
         return (f"employee={self.employee_id}; awaiting={self.awaiting.value}; leave draft: {draft}; "
-                f"proposal shown={'yes' if self.proposal_id else 'no'}\n"
+                f"proposal shown={'yes' if self.proposal else 'no'}\n"
                 f"assistant's last message: {self.last_reply[:400]}")
 
 
@@ -198,7 +198,7 @@ class HRAgent:
         # Short yes/no answers to the assistant's own question are handled without the LLM.
         if _YES.match(message) or _NO.match(message):
             yes = bool(_YES.match(message))
-            if s.awaiting == Awaiting.CONFIRMATION and s.proposal_id:
+            if s.awaiting == Awaiting.CONFIRMATION and s.proposal:
                 return await (self._confirm() if yes else self._decline())
             if s.awaiting == Awaiting.LEAVE_TYPE:
                 if yes:  # "yes" is not a leave type
@@ -213,9 +213,9 @@ class HRAgent:
                 return AgentReply("გასაგებია. მომავალი თარიღით ავადმყოფობის შვებულება აღირიცხება მხოლოდ მაშინ, როცა "
                                   "პერიოდი წინასწარ არის ცნობილი. ავადმყოფობისას აღრიცხეთ ის პირველ დღეს "
                                   f"({POLICY}, მუხლი 6.2).")
-            if yes and s.awaiting == Awaiting.NOTHING and s.last_created_proposal_id:
+            if yes and s.awaiting == Awaiting.NOTHING and s.last_created_proposal:
                 # Repeated confirmation: the server returns the existing request (idempotent).
-                return AgentReply(format_created(await self.tools.create(s.last_created_proposal_id)))
+                return AgentReply(format_created(await self.tools.create(s.last_created_proposal)))
 
         extraction = await self.llm.generate_structured(
             build_system_prompt(self.today), build_user_prompt(message, s.summary()), IntentExtraction)
@@ -226,13 +226,13 @@ class HRAgent:
         intent = x.intent
 
         if intent == Intent.CONFIRM:
-            if s.awaiting == Awaiting.CONFIRMATION and s.proposal_id:
+            if s.awaiting == Awaiting.CONFIRMATION and s.proposal:
                 return await self._confirm()
-            if s.last_created_proposal_id:
-                return AgentReply(format_created(await self.tools.create(s.last_created_proposal_id)))
+            if s.last_created_proposal:
+                return AgentReply(format_created(await self.tools.create(s.last_created_proposal)))
             return AgentReply("დასადასტურებელი მოთხოვნა ამ წუთას არ არის. " + HELP)
         if intent == Intent.DECLINE:
-            if s.awaiting == Awaiting.CONFIRMATION and s.proposal_id:
+            if s.awaiting == Awaiting.CONFIRMATION and s.proposal:
                 return await self._decline()
             self._reset_draft()
             return AgentReply("კარგი. სხვა რით შემიძლია დაგეხმაროთ?")
@@ -264,15 +264,15 @@ class HRAgent:
         return AgentReply(text)
 
     def _reset_draft(self) -> None:
-        self.state.draft, self.state.proposal_id, self.state.awaiting = None, None, Awaiting.NOTHING
+        self.state.draft, self.state.proposal, self.state.awaiting = None, None, Awaiting.NOTHING
 
     async def _update_draft(self, x: IntentExtraction, *, new_request: bool) -> AgentReply:
         s = self.state
         new_type = x.leave_type.value if x.leave_type else None
         if s.draft is None or (new_request and new_type and new_type != s.draft.leave_type):
             s.draft = LeaveDraft()
-        if s.proposal_id:  # any change invalidates the summary that was shown
-            s.proposal_id = None
+        if s.proposal:  # any change invalidates the summary that was shown
+            s.proposal = None
         d = s.draft
 
         try:
@@ -321,7 +321,7 @@ class HRAgent:
             conversation_id=s.conversation_id, leave_type=d.leave_type, start_date=d.start_date,
             end_date=d.end_date, comment=d.reason, sick_period_known_in_advance=d.period_known_in_advance)
         if p["outcome"] == "awaiting_confirmation":
-            s.proposal_id = p["proposal_id"]
+            s.proposal = p
             return self._ask(Awaiting.CONFIRMATION, format_proposal(p))
         codes = {v["code"] for v in p["violations"]}
         messages = "\n".join(f"{v['message']} ({POLICY}, მუხლი {v['article']})" for v in p["violations"])
@@ -354,18 +354,31 @@ class HRAgent:
         return AgentReply(f"{prefix}{body}{redirect}", answer.sources)
 
     async def _confirm(self) -> AgentReply:
+        """Create exactly the shown proposal. Nothing is ever created without a fresh, explicit "yes"."""
         s = self.state
-        proposal_id = s.proposal_id
+        proposal = s.proposal
         try:
-            result = await self.tools.create(proposal_id)
-        except ToolFailure:
+            result = await self.tools.create(proposal)
+        except ToolFailure as exc:
+            if exc.code == "proposal_not_confirmable" and exc.details.get("status") == "expired" and s.draft:
+                # The summary expired: re-check the same draft and ask again (never create implicitly).
+                s.proposal = None
+                reply = await self._advance()
+                if s.awaiting == Awaiting.CONFIRMATION:
+                    reply.text = "წინა შეჯამებას ვადა გაუვიდა, ამიტომ წესები თავიდან შევამოწმე.\n\n" + reply.text
+                return reply
             self._reset_draft()  # the shown summary is no longer valid; never retry it implicitly
+            if exc.code == "proposal_rules_changed":
+                details = "\n".join(
+                    f"• {v['message']}" + (f" ({POLICY}, მუხლი {v['article']})" if v.get("article") else "")
+                    for v in exc.details.get("violations", []))
+                return AgentReply(f"{exc.message} მოთხოვნა არ შეიქმნა.\n{details}".rstrip())
             raise
-        s.last_created_proposal_id = proposal_id
+        s.last_created_proposal = proposal
         self._reset_draft()
         return AgentReply(format_created(result))
 
     async def _decline(self) -> AgentReply:
-        await self.tools.decline(self.state.proposal_id)
+        await self.tools.decline(self.state.proposal["proposal_id"])
         self._reset_draft()
         return AgentReply("კარგი, მოთხოვნა არ შეიქმნა.")

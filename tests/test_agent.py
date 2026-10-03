@@ -1,7 +1,7 @@
 """Agent routing and the 10 assignment scenarios (LLM mocked; MCP server, DB and RAG are real)."""
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from northstar.agent.policy_qa import NO_INFO
@@ -317,3 +317,50 @@ def test_tool_allow_list_excludes_hr_actions():
         return exc.value.code
 
     assert anyio.run(go) == "tool_not_allowed"
+
+
+# --- Phase 11: confirmation hardening at the agent level -----------------------------------------
+
+ANNUAL_27_30 = "27-დან 30 ოქტომბრამდე ყოველწლიური შვებულება მინდა"
+
+
+def annual_llm():
+    return FakeLLM({ANNUAL_27_30: X("CREATE_LEAVE_REQUEST", leave_type="ANNUAL", leave_type_explicit=True,
+                                    start_date="2026-10-27", end_date="2026-10-30")})
+
+
+def test_create_sends_exactly_the_shown_proposal(talk):
+    (shown, _), agent = talk(annual_llm(), ANNUAL_27_30, "დიახ")
+    create = [c for c in agent.tools.calls if c.name == "create_leave_request"][0]
+    assert {k: create.arguments[k] for k in ("leave_type", "start_date", "end_date")} == \
+        {"leave_type": "ANNUAL", "start_date": "2026-10-27", "end_date": "2026-10-30"}
+    assert "employee_id" not in create.arguments and "2026-10-27 – 2026-10-30" in shown.text
+
+
+def test_expired_summary_is_rechecked_and_shown_again(talk, seeded_engine):
+    def expire():
+        with seeded_engine.begin() as conn:
+            conn.execute(text("UPDATE leave_proposals SET created_at = created_at - interval '2 hours', "
+                              "expires_at = created_at - interval '1 hour'"))
+
+    (shown, again, created), agent = talk(annual_llm(), ANNUAL_27_30, expire, "დიახ", "დიახ")
+    assert again.tools == ["create_leave_request", "propose_leave_request"]   # refused, then re-checked
+    assert again.text.startswith("წინა შეჯამებას ვადა გაუვიდა") and "შევქმნა მოთხოვნა?" in again.text
+    assert "#28" in created.text
+    assistant_rows = [r for r in requests_in_db(seeded_engine) if r.created_via == "assistant"]
+    assert len(assistant_rows) == 1                                  # only the second, fresh "yes" created it
+    assert str(assistant_rows[0].proposal_id) == agent.state.last_created_proposal["proposal_id"]
+
+
+def test_rules_changed_before_yes_creates_nothing(talk, seeded_engine):
+    def book_overlapping_in_portal():
+        with seeded_engine.begin() as conn:
+            conn.execute(text("INSERT INTO leave_requests (employee_id, leave_type, start_date, end_date, days, "
+                              "status, created_at, created_via) VALUES ('E1001','ANNUAL','2026-10-29','2026-10-29',"
+                              "1,'pending', now(), 'portal')"))
+
+    (_, r, again), agent = talk(annual_llm(), ANNUAL_27_30, book_overlapping_in_portal, "დიახ", "დიახ")
+    assert "პირობები შეიცვალა" in r.text and "მოთხოვნა არ შეიქმნა" in r.text and "•" in r.text
+    assert agent.state.proposal is None and agent.state.awaiting == "nothing"
+    assert "create_leave_request" not in again.tools                # a later "yes" never re-creates implicitly
+    assert all(req.created_via != "assistant" for req in requests_in_db(seeded_engine))

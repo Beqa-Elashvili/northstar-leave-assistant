@@ -79,6 +79,14 @@ Idempotency is enforced twice: the service locks the proposal row (`SELECT … F
 returns the stored `created_request_id` on a repeated confirmation; the `UNIQUE (proposal_id)`
 constraint on `leave_requests` makes a duplicate insert impossible even under a race.
 
+Confirmation flow (spec 21, 29, 30): `propose_leave_request(conversation_id, leave_type, start_date,
+end_date, comment)` checks every rule and stores a proposal (30-minute TTL) without creating anything.
+The CLI shows the summary and waits for an explicit "დიახ". Only then does it call
+`create_leave_request(leave_type, start_date, end_date, comment, proposal_id)`. The server checks
+that the data equals the confirmed proposal (otherwise `proposal_mismatch`) and re-checks all rules.
+A changed situation returns `proposal_rules_changed`, and an expired proposal returns
+`proposal_not_confirmable`; for an expired proposal, the agent re-checks the draft and shows a new summary.
+
 ## Identity and role model (local development)
 
 There is no real login in the supplied material, so identity is an explicit, documented

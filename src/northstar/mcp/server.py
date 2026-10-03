@@ -57,7 +57,7 @@ EmployeeId = Annotated[str, Field(pattern=r"^[Ee]\d{4}$", description="Employee 
 INSTRUCTIONS = (
     "Northstar Services leave management. The caller's identity is fixed by the server session. "
     "To create a leave request: call propose_leave_request, show the proposal to the employee, and only after "
-    "the employee explicitly confirms call create_leave_request with the proposal_id. "
+    "the employee explicitly confirms call create_leave_request with the same data and the proposal_id. "
     "Approve/reject/cancel require the HR role."
 )
 
@@ -153,11 +153,21 @@ def build_server(
                                        sick_period_known_in_advance))
 
     @server.tool(annotations=WRITE_IDEMPOTENT,
-                 description="Create the leave request of a proposal the employee has explicitly confirmed. The new "
-                             "request is pending (not approved) and created_via=assistant. Idempotent: confirming the "
-                             "same proposal again returns the original request instead of creating a duplicate.")
-    def create_leave_request(proposal_id: uuid.UUID) -> CreateRequestOut:
-        return run(lambda s: s.confirm(principal, proposal_id))
+                 description="Create a leave request for the authenticated employee (never for another employee) "
+                             "after the employee explicitly confirmed the summary returned by propose_leave_request. "
+                             "leave_type, start_date, end_date and comment must equal that proposal; proposal_id is "
+                             "the confirmation token. All rules are re-checked. The new request is pending (not "
+                             "approved) and created_via=assistant. Idempotent: confirming the same proposal again "
+                             "returns the original request instead of creating a duplicate.")
+    def create_leave_request(
+        leave_type: LeaveTypeCode,
+        start_date: date,
+        end_date: date,
+        proposal_id: Annotated[uuid.UUID, Field(description="proposal_id of the confirmed proposal")],
+        comment: Annotated[str | None, Field(max_length=500, description="Short reason (required for UNPAID); "
+                                                                          "never health details")] = None,
+    ) -> CreateRequestOut:
+        return run(lambda s: s.confirm(principal, proposal_id, leave_type, start_date, end_date, comment))
 
     @server.tool(annotations=WRITE_IDEMPOTENT, description="Discard a proposal the employee declined.")
     def decline_leave_proposal(proposal_id: uuid.UUID) -> ProposalStatusOut:

@@ -28,6 +28,7 @@ from northstar.domain.errors import (
     EntitlementNotFound,
     InvalidDateRange,
     InvalidStatusTransition,
+    ProposalMismatch,
     ProposalNotConfirmable,
     ProposalNotFound,
     ProposalRulesChanged,
@@ -170,11 +171,23 @@ class LeaveService:
             out.available_days_after = ctx.available_days - result.days
         return out
 
-    def confirm(self, principal: Principal, proposal_id: uuid.UUID) -> CreateRequestOut:
+    def confirm(self, principal: Principal, proposal_id: uuid.UUID, leave_type: str, start_date: date,
+                end_date: date, comment: str | None) -> CreateRequestOut:
+        """Create the request the employee explicitly confirmed (create_leave_request).
+
+        The request data must equal the confirmed proposal: the summary the employee said "yes" to is
+        exactly what is stored. The employee always comes from the authenticated principal.
+        """
         proposal = self.proposals.get(proposal_id, for_update=True)  # serialises concurrent confirmations
         if proposal is None or proposal.employee_id != principal.employee_id:
             # Another employee's proposal is reported exactly like a missing one.
             raise ProposalNotFound("შეთავაზება ვერ მოიძებნა.")
+        requested = (leave_type.strip().upper(), start_date, end_date, (comment or "").strip() or None)
+        if requested != (proposal.leave_type, proposal.start_date, proposal.end_date, proposal.comment):
+            raise ProposalMismatch(
+                "მოთხოვნის მონაცემები არ ემთხვევა დადასტურებულ შეჯამებას. მოთხოვნა არ შეიქმნა.",
+                details={"proposal": {"leave_type": proposal.leave_type, "start_date": proposal.start_date.isoformat(),
+                                      "end_date": proposal.end_date.isoformat()}})
 
         if proposal.status == "confirmed":
             existing = self.requests.get(proposal.created_request_id)

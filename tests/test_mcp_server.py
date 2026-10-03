@@ -43,6 +43,13 @@ def propose(h, **kw):
     return h.call("propose_leave_request", **args)
 
 
+def create_args(p, **override):
+    """create_leave_request arguments for exactly the proposal that was shown and confirmed."""
+    args = {k: p[k] for k in ("leave_type", "start_date", "end_date", "comment", "proposal_id") if p.get(k) is not None}
+    args.update(override)
+    return args
+
+
 def error_code(h, tool, **kw):
     with pytest.raises(ToolCallError) as exc:
         h.call(tool, **kw)
@@ -141,7 +148,7 @@ def test_scenario_2_annual_proposal_then_confirmation(nino, seeded_engine):
     assert (p["available_days_before"], p["available_days_after"]) == (10, 6)
     assert request_count(seeded_engine) == 27  # nothing created before confirmation
 
-    created = nino.call("create_leave_request", proposal_id=p["proposal_id"])
+    created = nino.call("create_leave_request", **create_args(p))
     r = created["request"]
     assert created["already_existed"] is False
     assert (r["request_id"], r["employee_id"], r["status"], r["created_via"], r["days"]) == \
@@ -158,8 +165,8 @@ def test_scenario_2_original_dates_violate_notice(nino):
 
 def test_scenario_10_duplicate_confirmation_is_idempotent(nino, seeded_engine):
     p = propose(nino)
-    first = nino.call("create_leave_request", proposal_id=p["proposal_id"])
-    second = nino.call("create_leave_request", proposal_id=p["proposal_id"])
+    first = nino.call("create_leave_request", **create_args(p))
+    second = nino.call("create_leave_request", **create_args(p))
     assert second["already_existed"] is True
     assert second["request"]["request_id"] == first["request"]["request_id"]
     assert request_count(seeded_engine) == 28
@@ -172,7 +179,7 @@ def test_scenario_3_unpaid_reason_flow(nino, seeded_engine):
     p = propose(nino, conversation_id=conv, leave_type="UNPAID", start_date="2026-11-03", end_date="2026-11-06",
                 comment="ოჯახური მიზეზი")
     assert p["outcome"] == "awaiting_confirmation" and p["days"] == 4 and p["day_unit"] == "calendar"
-    r = nino.call("create_leave_request", proposal_id=p["proposal_id"])["request"]
+    r = nino.call("create_leave_request", **create_args(p))["request"]
     assert r["comment"] == "ოჯახური მიზეზი" and r["leave_type"] == "UNPAID"
 
 
@@ -187,7 +194,7 @@ def test_scenario_4_sick_over_paid_balance_not_created(nino, seeded_engine):
 def test_sick_within_balance_is_created(nino):
     p = propose(nino, leave_type="SICK", start_date="2026-10-19", end_date="2026-10-20")
     assert p["outcome"] == "awaiting_confirmation"
-    assert nino.call("create_leave_request", proposal_id=p["proposal_id"])["request"]["leave_type"] == "SICK"
+    assert nino.call("create_leave_request", **create_args(p))["request"]["leave_type"] == "SICK"
 
 
 @pytest.mark.parametrize("lt", ["BEREAVEMENT", "STUDY", "PARENTAL"])
@@ -201,38 +208,39 @@ def test_unsupported_types_never_create(nino, seeded_engine, lt):
 
 def test_injected_employee_id_is_ignored(nino, seeded_engine):
     p = propose(nino, employee_id="E1002")  # not part of the schema -> dropped by the server
-    r = nino.call("create_leave_request", proposal_id=p["proposal_id"])["request"]
+    r = nino.call("create_leave_request", **create_args(p))["request"]
     assert r["employee_id"] == "E1001"
 
 
 def test_other_employee_cannot_confirm_my_proposal(nino, seeded_engine):
     p = propose(nino)
     ana = McpHarness(seeded_engine, "E1005")
-    assert error_code(ana, "create_leave_request", proposal_id=p["proposal_id"]).code == "proposal_not_found"
+    assert error_code(ana, "create_leave_request", **create_args(p)).code == "proposal_not_found"
     assert request_count(seeded_engine) == 27
 
 
 def test_unknown_proposal(nino):
-    assert error_code(nino, "create_leave_request", proposal_id=str(uuid.uuid4())).code == "proposal_not_found"
+    assert error_code(nino, "create_leave_request", leave_type="ANNUAL", start_date="2026-10-27",
+                      end_date="2026-10-30", proposal_id=str(uuid.uuid4())).code == "proposal_not_found"
 
 
 def test_declined_proposal_cannot_be_confirmed(nino):
     p = propose(nino)
     assert nino.call("decline_leave_proposal", proposal_id=p["proposal_id"])["status"] == "declined"
-    assert error_code(nino, "create_leave_request", proposal_id=p["proposal_id"]).code == "proposal_not_confirmable"
+    assert error_code(nino, "create_leave_request", **create_args(p)).code == "proposal_not_confirmable"
 
 
 def test_new_proposal_supersedes_previous_in_same_conversation(nino):
     conv = str(uuid.uuid4())
     first = propose(nino, conversation_id=conv)
     propose(nino, conversation_id=conv, start_date="2026-11-02", end_date="2026-11-03")
-    assert error_code(nino, "create_leave_request", proposal_id=first["proposal_id"]).code == "proposal_not_confirmable"
+    assert error_code(nino, "create_leave_request", **create_args(first)).code == "proposal_not_confirmable"
 
 
 def test_expired_proposal(nino, seeded_engine):
     p = propose(nino)
     later = McpHarness(seeded_engine, "E1001", clock=FrozenClock(CLOCK.now() + timedelta(minutes=31)))
-    assert error_code(later, "create_leave_request", proposal_id=p["proposal_id"]).code == "proposal_not_confirmable"
+    assert error_code(later, "create_leave_request", **create_args(p)).code == "proposal_not_confirmable"
 
 
 def test_rules_rechecked_at_confirmation(nino, seeded_engine):
@@ -241,7 +249,7 @@ def test_rules_rechecked_at_confirmation(nino, seeded_engine):
         conn.execute(text("INSERT INTO leave_requests (employee_id, leave_type, start_date, end_date, days, status,"
                           " created_at, created_via) VALUES ('E1001','ANNUAL','2026-10-29','2026-10-29',1,"
                           " 'pending', now(), 'portal')"))
-    err = error_code(nino, "create_leave_request", proposal_id=p["proposal_id"])
+    err = error_code(nino, "create_leave_request", **create_args(p))
     assert err.code == "proposal_rules_changed"
     assert err.payload["details"]["violations"][0]["code"] == "overlapping_request"
 
@@ -293,3 +301,61 @@ def test_hr_role_requires_hr_department(seeded_engine):
 def test_unknown_identity_rejected(seeded_engine):
     ghost = McpHarness(seeded_engine, "E9999")
     assert error_code(ghost, "get_my_profile").code == "authentication_error"
+
+
+# --- Phase 11: confirmation / idempotency hardening --------------------------------------------
+
+def test_create_tool_takes_request_data_and_no_employee(nino):
+    schema = {t.name: t for t in nino.list_tools()}["create_leave_request"].input_schema
+    assert set(schema["required"]) == {"leave_type", "start_date", "end_date", "proposal_id"}
+    assert "comment" in schema["properties"] and "employee_id" not in schema["properties"]
+
+
+@pytest.mark.parametrize("override", [
+    {"start_date": "2026-10-28"},
+    {"end_date": "2026-11-02"},
+    {"leave_type": "SICK"},
+    {"comment": "სხვა მიზეზი"},
+])
+def test_create_with_data_other_than_confirmed_is_refused(nino, seeded_engine, override):
+    p = propose(nino)
+    err = error_code(nino, "create_leave_request", **create_args(p, **override))
+    assert err.code == "proposal_mismatch"
+    assert request_count(seeded_engine) == 27
+    # the untouched proposal can still be confirmed with the shown data
+    assert nino.call("create_leave_request", **create_args(p))["request"]["request_id"] == 28
+
+
+def test_mismatch_after_confirmation_does_not_return_the_request(nino, seeded_engine):
+    p = propose(nino)
+    nino.call("create_leave_request", **create_args(p))
+    assert error_code(nino, "create_leave_request", **create_args(p, end_date="2026-10-29")).code \
+        == "proposal_mismatch"
+    assert request_count(seeded_engine) == 28
+
+
+def test_unpaid_comment_must_match_confirmed_reason(nino):
+    p = propose(nino, leave_type="UNPAID", start_date="2026-11-03", end_date="2026-11-06", comment=" ოჯახური მიზეზი ")
+    assert p["comment"] == "ოჯახური მიზეზი"
+    assert error_code(nino, "create_leave_request", **create_args(p, comment=None)).code == "proposal_mismatch"
+    assert nino.call("create_leave_request", **create_args(p))["request"]["comment"] == "ოჯახური მიზეზი"
+
+
+def test_concurrent_confirmations_create_one_request(nino, seeded_engine):
+    """Several simultaneous "yes" for one proposal (separate sessions/transactions) -> exactly one request."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    p = propose(nino)
+    harnesses = [McpHarness(seeded_engine, "E1001") for _ in range(6)]
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        results = list(pool.map(lambda h: h.call("create_leave_request", **create_args(p)), harnesses))
+    assert {r["request"]["request_id"] for r in results} == {28}
+    assert sorted(r["already_existed"] for r in results) == [False] + [True] * 5
+    assert request_count(seeded_engine) == 28
+
+
+def test_hr_role_cannot_create_from_employee_proposal(nino, seeded_engine):
+    p = propose(nino)
+    hr = McpHarness(seeded_engine, "E1007", role=Role.HR)
+    assert error_code(hr, "create_leave_request", **create_args(p)).code == "proposal_not_found"
+    assert request_count(seeded_engine) == 27

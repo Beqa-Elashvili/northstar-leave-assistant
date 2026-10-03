@@ -67,6 +67,12 @@ class ProposalNotConfirmable(DomainError):
     code = "proposal_not_confirmable"
 
 
+class ProposalMismatch(DomainError):
+    """create_leave_request data differs from the proposal the employee confirmed."""
+
+    code = "proposal_mismatch"
+
+
 class ProposalRulesChanged(DomainError):
     """The proposal no longer satisfies the rules at confirmation time (details carry the violations)."""
 

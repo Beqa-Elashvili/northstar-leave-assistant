@@ -82,8 +82,11 @@ class McpLeaveTools:
                                 start_date=start_date, end_date=end_date, comment=comment,
                                 sick_period_known_in_advance=sick_period_known_in_advance)
 
-    async def create(self, proposal_id: str) -> dict:
-        return await self._call("create_leave_request", proposal_id=proposal_id)
+    async def create(self, proposal: dict) -> dict:
+        """Create exactly the request of the proposal the employee confirmed."""
+        return await self._call("create_leave_request", leave_type=proposal["leave_type"],
+                                start_date=proposal["start_date"], end_date=proposal["end_date"],
+                                comment=proposal.get("comment"), proposal_id=proposal["proposal_id"])
 
     async def decline(self, proposal_id: str) -> dict:
         return await self._call("decline_leave_proposal", proposal_id=proposal_id)

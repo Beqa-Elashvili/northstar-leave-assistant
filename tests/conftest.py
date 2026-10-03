@@ -22,6 +22,8 @@ import pytest
 os.environ["APP_TODAY"] = "2026-10-19"
 os.environ["APP_TIMEZONE"] = "Asia/Tbilisi"
 os.environ.setdefault("DEMO_EMPLOYEE_ID", "E1001")
+# The core suite never calls external AI services.
+os.environ["EMBEDDING_PROVIDER"] = "local"
 
 
 def _database_url() -> str | None:

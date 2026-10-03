@@ -9,6 +9,7 @@ import re
 from datetime import date
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import Field, SecretStr, field_validator
@@ -43,8 +44,11 @@ class Settings(BaseSettings):
 
     gemini_api_key: SecretStr | None = Field(default=None, alias="GEMINI_API_KEY")
     gemini_model: str = Field(default="gemini-2.5-flash", alias="GEMINI_MODEL")
+    embedding_provider: Literal["gemini", "local"] = Field(default="gemini", alias="EMBEDDING_PROVIDER")
     embedding_model: str = Field(default="gemini-embedding-001", alias="EMBEDDING_MODEL")
     embedding_dim: int = Field(default=768, alias="EMBEDDING_DIM")
+    # Gemini free tier: 100 embedded texts per minute per model; stay below it.
+    embedding_rpm: int = Field(default=90, ge=1, alias="EMBEDDING_RPM")
 
     demo_employee_id: str | None = Field(default=None, alias="DEMO_EMPLOYEE_ID")
 

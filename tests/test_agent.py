@@ -263,3 +263,18 @@ def test_rules_changed_before_yes_creates_nothing(talk, seeded_engine):
     assert agent.state.proposal is None and agent.state.awaiting == "nothing"
     assert "create_leave_request" not in again.tools                # a later "yes" never re-creates implicitly
     assert all(req.created_via != "assistant" for req in requests_in_db(seeded_engine))
+
+
+@pytest.mark.parametrize("leave_type, days, expected, absent", [
+    ("ANNUAL", 4, "მუხლი 4.4", "მუხლი 7.3"),
+    ("UNPAID", 4, "მუხლი 7.3", "მუხლი 4.4"),
+    ("SICK", 3, "მუხლი 6.3", "მუხლი 4.4"),
+    ("SICK", 2, "მუხლი 12.2", "მუხლი 6.3"),
+])
+def test_created_message_states_only_that_types_policy(leave_type, days, expected, absent):
+    from northstar.agent.formatting import format_created
+
+    text = format_created({"request": {"request_id": 28, "leave_type": leave_type, "start_date": "2026-11-03",
+                                       "end_date": "2026-11-06", "days": days, "status": "pending"}})
+    assert "#28" in text and "დამტკიცებას არ ნიშნავს (მუხლი 12.2)" in text
+    assert expected in text and absent not in text

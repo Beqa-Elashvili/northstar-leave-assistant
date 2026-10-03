@@ -121,6 +121,9 @@ class GeminiEmbeddingProvider:
                     out.extend(_normalise(list(e.values)) for e in response.embeddings)
                     break
                 except errors.APIError as exc:
+                    if getattr(exc, "code", None) in (401, 402, 403):
+                        raise EmbeddingError(f"Gemini API key/billing problem (HTTP {exc.code}); check the key and "
+                                             "credits in Google AI Studio") from None
                     retryable = getattr(exc, "code", None) in (429, 500, 502, 503, 504)
                     if not retryable or attempt == self.MAX_ATTEMPTS:
                         raise EmbeddingError(f"Gemini embedding request failed (HTTP {getattr(exc, 'code', '?')})") from None

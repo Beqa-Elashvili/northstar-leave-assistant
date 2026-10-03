@@ -70,3 +70,31 @@ def engine(db_url, db_schema):
     eng = make_engine(db_url, db_schema)
     yield eng
     eng.dispose()
+
+
+@pytest.fixture(scope="session")
+def seed_data():
+    from zoneinfo import ZoneInfo
+
+    from northstar.config import DATA_DIR
+    from northstar.database.csv_loader import load_seed_data
+
+    return load_seed_data(DATA_DIR, ZoneInfo("Asia/Tbilisi"))
+
+
+@pytest.fixture()
+def seeded_engine(engine, seed_data):
+    """The test schema reset to exactly the supplied CSV snapshot before each test."""
+    from northstar.database.seed import seed_database
+
+    seed_database(engine, seed_data, reset=True)
+    return engine
+
+
+@pytest.fixture()
+def session(seeded_engine):
+    from sqlalchemy.orm import Session
+
+    with Session(seeded_engine, expire_on_commit=False) as s:
+        yield s
+        s.rollback()

@@ -75,6 +75,10 @@ def conn(engine):
     """A connection whose changes are rolled back after each test."""
     with engine.connect() as c:
         tx = c.begin()
+        # Start from empty tables inside the rolled-back transaction, whatever other tests seeded.
+        c.execute(text(
+            "TRUNCATE leave_requests, leave_proposals, leave_entitlements, public_holidays, employees,"
+            " leave_types, document_chunks, rag_documents CASCADE"))
         c.execute(text(
             "INSERT INTO leave_types VALUES "
             "('ANNUAL','a','working',NULL,true,true,'4'),('SICK','s','working',10,true,true,'6'),"

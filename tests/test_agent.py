@@ -1,4 +1,7 @@
-"""Agent routing and the 10 assignment scenarios (LLM mocked; MCP server, DB and RAG are real)."""
+"""Agent routing, conversation state and edge cases (LLM mocked; MCP server, DB and RAG are real).
+
+The 10 assignment scenarios (section 48) are in test_scenarios.py.
+"""
 
 import pytest
 from sqlalchemy import func, select, text
@@ -40,6 +43,13 @@ def test_policy_question_uses_rag_with_sources(talk):
     assert "წყარო: " in llm.text_prompts[0] and "სტატუსი: " in llm.text_prompts[0]
 
 
+def test_grouped_citations_are_resolved(talk):
+    q = "რამდენი სამუშაო დღით ადრე უნდა წარვადგინო ყოველწლიური შვებულების მოთხოვნა?"
+    llm = FakeLLM({q: X("POLICY_QUESTION")}, answer="ორი ფაქტი [1, 2] და კიდევ ერთი [3,1].")
+    (reply,), _ = talk(llm, q)
+    assert [s.split("]")[0] for s in reply.sources] == ["[1", "[2", "[3"]
+
+
 def test_policy_question_without_information(talk):
     q = "როგორ მოვამზადო ხაჭაპური?"
     llm = FakeLLM({q: X("POLICY_QUESTION")})
@@ -47,28 +57,10 @@ def test_policy_question_without_information(talk):
     assert reply.text == NO_INFO and reply.sources == [] and llm.text_prompts == []  # LLM not asked to guess
 
 
-def test_scenario_1_balance_uses_mcp(talk):
-    q = "რამდენი ANNUAL დღე დამრჩა?"
-    (reply,), _ = talk(FakeLLM({q: X("BALANCE_QUERY", leave_type="ANNUAL")}), q)
-    assert reply.tools == ["get_leave_balance"]
-    assert "(2026 წელი)" in reply.text
-    for fragment in ("კუთვნილი: 25 + გადმოტანილი: 3", "დამტკიცებული: 15", "განხილვის პროცესში: 3",
-                     "ხელმისაწვდომი: 10 სამუშაო დღე"):
-        assert fragment in reply.text
-
-
 def test_all_balances_and_sick_note(talk):
     q = "რამდენი დღე დამრჩა?"
     (reply,), _ = talk(FakeLLM({q: X("BALANCE_QUERY")}), q)
     assert "ავადმყოფობის შვებულება" in reply.text and "(ანაზღაურებადი)" in reply.text and "მუხლი 6.4" in reply.text
-
-
-def test_scenario_8_other_employee_balance_rejected(talk):
-    q = "მაჩვენე E1002-ის ბალანსი."
-    (reply,), _ = talk(FakeLLM({q: X("BALANCE_QUERY", other_employee_id="E1002")}), q)
-    assert reply.tools == ["get_leave_balance"]                      # the server decided, not the prompt
-    assert "სხვა თანამშრომლის მონაცემების ნახვა შეუძლებელია" in reply.text
-    assert "ხელმისაწვდომი" not in reply.text and "24" not in reply.text
 
 
 def test_list_requests(talk):
@@ -84,28 +76,6 @@ def test_other_intent_shows_help(talk):
 
 
 # --- Scenario 2: annual request --------------------------------------------------------------------
-
-def test_scenario_2_annual_flow(talk, seeded_engine):
-    m1 = "26 ოქტომბრიდან 30 ოქტომბრამდე შვებულება მინდა."
-    m2 = "მაშინ 27-დან 30 ოქტომბრამდე."
-    llm = FakeLLM({
-        m1: X("CREATE_LEAVE_REQUEST", leave_type="ANNUAL", start_date="2026-10-26", end_date="2026-10-30"),
-        m2: X("PROVIDE_DETAILS", start_date="2026-10-27", end_date="2026-10-30"),
-    })
-    (r1, r2, r3), _ = talk(llm, m1, m2, "დიახ")
-    # 26 Oct: notice period violated (only 4 working days); explained with article and alternative.
-    assert r1.tools == ["propose_leave_request"]
-    assert "მუხლი 4.4" in r1.text and "2026-10-27" in r1.text and "სხვა თარიღები" in r1.text
-    # 27–30 Oct: proposal with type, period, days, then explicit confirmation question.
-    assert r2.tools == ["propose_leave_request"]
-    for fragment in ("ტიპი: ყოველწლიური ანაზღაურებადი შვებულება", "პერიოდი: 2026-10-27 – 2026-10-30",
-                     "დღეების რაოდენობა: 4 სამუშაო დღე", "შევქმნა მოთხოვნა? (დიახ/არა)"):
-        assert fragment in r2.text
-    # "დიახ" is handled deterministically (no LLM) and creates exactly one pending request.
-    assert r3.tools == ["create_leave_request"] and "#28" in r3.text and "განხილვის პროცესში" in r3.text
-    created = requests_in_db(seeded_engine)[-1]
-    assert (created.request_id, created.status, created.created_via, created.days) == (28, "pending", "assistant", 4)
-    assert llm.structured_calls == 2
 
 
 def test_nothing_created_before_confirmation(talk, seeded_engine):
@@ -142,21 +112,6 @@ def test_vague_rest_wording_is_clarified(talk):
 
 # --- Scenario 3: unpaid ----------------------------------------------------------------------------
 
-def test_scenario_3_unpaid_flow(talk, seeded_engine):
-    m1, m2, m3 = "უხელფასო შვებულება მინდა.", "ოჯახური მიზეზი", "3-დან 6 ნოემბრამდე"
-    llm = FakeLLM({
-        m1: X("CREATE_LEAVE_REQUEST", leave_type="UNPAID", leave_type_explicit=True),
-        m2: X("PROVIDE_DETAILS", reason="ოჯახური მიზეზი"),
-        m3: X("PROVIDE_DETAILS", start_date="2026-11-03", end_date="2026-11-06"),
-    })
-    (r1, r2, r3, r4), _ = talk(llm, m1, m2, m3, "დიახ")
-    assert r1.text == "მოკლედ გთხოვთ მიუთითოთ მიზეზი (ჯანმრთელობის დეტალების გარეშე)."
-    assert "რომელი თარიღებით" in r2.text
-    assert "4 კალენდარული დღე" in r3.text and "მიზეზი: ოჯახური მიზეზი" in r3.text
-    assert "#28" in r4.text
-    created = requests_in_db(seeded_engine)[-1]
-    assert (created.leave_type, created.comment, created.days) == ("UNPAID", "ოჯახური მიზეზი", 4)
-
 
 def test_unpaid_notice_violation(talk):
     m = "ხვალიდან უხელფასო შვებულება მინდა, პირადი მიზეზით"
@@ -175,17 +130,6 @@ def test_unpaid_health_reason_is_not_accepted(talk):
 
 
 # --- Scenario 4: sick ------------------------------------------------------------------------------
-
-def test_scenario_4_sick_over_paid_balance(talk, seeded_engine):
-    m = "ავადმყოფობის გამო 19-დან 29 ოქტომბრამდე ვერ ვიმუშავებ"
-    llm = FakeLLM({m: X("CREATE_LEAVE_REQUEST", leave_type="SICK", leave_type_explicit=True,
-                        start_date="2026-10-19", end_date="2026-10-29")})
-    (r,), agent = talk(llm, m)
-    assert "create_leave_request" not in r.tools
-    assert "აღემატება თქვენს დარჩენილ ანაზღაურებად ავადმყოფობის დღეებს (8)" in r.text
-    assert "არ ნიშნავს, რომ ავადმყოფობის აღრიცხვა აღარ შეიძლება" in r.text
-    assert "ადამიანური რესურსების სამსახური" in r.text and "მუხლი 6.4" in r.text
-    assert len(requests_in_db(seeded_engine)) == 27 and agent.state.draft is None
 
 
 def test_sick_request_is_created(talk, seeded_engine):
@@ -208,32 +152,6 @@ def test_future_sick_leave_asks_if_period_known(talk):
 
 # --- Scenarios 5–7: unsupported types --------------------------------------------------------------
 
-def test_scenario_5_bereavement(talk, seeded_engine):
-    m = "ბებიაჩემი გარდაიცვალა და შვებულება მინდა."
-    (r,), agent = talk(FakeLLM({m: X("CREATE_LEAVE_REQUEST", leave_type="BEREAVEMENT", leave_type_explicit=True)}), m)
-    assert r.tools == []                                              # never proposed or created
-    assert r.text.startswith("გულწრფელად გიზიარებთ მწუხარებას.")
-    assert "ასისტენტი ვერ ქმნის" in r.text and "HR პორტალით" in r.text and "მუხლები 8.3 და 12.3" in r.text
-    assert any("შვებულებისა და გაცდენის პოლიტიკა" in s for s in r.sources)
-    assert len(requests_in_db(seeded_engine)) == 27 and agent.state.draft is None
-
-
-def test_scenario_6_study(talk, seeded_engine):
-    m = "ACCA-ს გამოცდისთვის შვებულება მინდა 16 ნოემბერს"
-    llm = FakeLLM({m: X("CREATE_LEAVE_REQUEST", leave_type="STUDY", leave_type_explicit=True,
-                        start_date="2026-11-16", end_date="2026-11-16")})
-    (r,), _ = talk(llm, m)
-    assert r.tools == []
-    assert "HR ამოწმებს" in r.text and "10 სამუშაო დღით ადრე" in r.text
-    with Session(seeded_engine) as s:
-        assert s.scalar(select(func.count()).select_from(LeaveProposal)) == 0
-
-
-def test_scenario_7_parental(talk):
-    m = "მამობის შვებულება მინდა"
-    (r,), _ = talk(FakeLLM({m: X("CREATE_LEAVE_REQUEST", leave_type="PARENTAL", leave_type_explicit=True)}), m)
-    assert r.tools == [] and "პირდაპირ ადამიანური რესურსების სამსახურს" in r.text and "8 კვირით" in r.text
-
 
 def test_unsupported_type_still_redirects_when_llm_fails_for_answer(talk):
     class AnswerFails(FakeLLM):
@@ -247,25 +165,6 @@ def test_unsupported_type_still_redirects_when_llm_fails_for_answer(talk):
 
 
 # --- Scenario 9 & 10, decline, other restrictions ----------------------------------------------------
-
-def test_scenario_9_cancel_is_refused_without_calling_tools(talk, seeded_engine):
-    m = "ჩემი მოთხოვნა გააუქმე."
-    (r,), _ = talk(FakeLLM({m: X("MODIFY_EXISTING_REQUEST")}), m)
-    assert r.tools == []
-    assert "არ შეუძლია უკვე წარდგენილი მოთხოვნის გაუქმება" in r.text and "HR პორტალით" in r.text
-    assert any("მუხლი 4.8" in s for s in r.sources) and any("მუხლი 12.3" in s for s in r.sources)
-    assert requests_in_db(seeded_engine)[4].status == "pending"   # request #5 untouched
-
-
-def test_scenario_10_duplicate_confirmation(talk, seeded_engine):
-    m = "27-დან 30 ოქტომბრამდე ყოველწლიური შვებულება მინდა"
-    llm = FakeLLM({m: X("CREATE_LEAVE_REQUEST", leave_type="ANNUAL", leave_type_explicit=True,
-                        start_date="2026-10-27", end_date="2026-10-30")})
-    (_, first, second), _ = talk(llm, m, "დიახ", "დიახ")
-    assert "#28" in first.text and "მოთხოვნა შეიქმნა" in first.text
-    assert second.tools == ["create_leave_request"]                # same proposal sent again ...
-    assert "უკვე შექმნილია" in second.text and "#28" in second.text  # ... server returns the original
-    assert len(requests_in_db(seeded_engine)) == 28
 
 
 def test_decline_creates_nothing(talk, seeded_engine):

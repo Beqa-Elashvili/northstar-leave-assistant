@@ -47,6 +47,8 @@ _NO = re.compile(r"^(არა|ara|no|n|არ მინდა|არ შექ�
 
 ASSISTANT_TYPES = ("ANNUAL", "SICK", "UNPAID")
 
+# Per type: (retrieval question, deterministic redirect, key facts from the policy used when no
+# grounded RAG answer is available — e.g. the LLM or the document store is down).
 UNSUPPORTED_GUIDE = {
     "BEREAVEMENT": (
         "გლოვის შვებულება: რამდენი დღე ეკუთვნის ახლო ოჯახის წევრის და სხვა ნათესავის (ბებია, ბაბუა) "
@@ -54,6 +56,10 @@ UNSUPPORTED_GUIDE = {
         "ამ მოთხოვნას ასისტენტი ვერ ქმნის. გლოვის შვებულების მოთხოვნა წარადგინეთ HR პორტალით ან ადამიანური "
         "რესურსების სამსახურის მეშვეობით, არაუგვიანეს 2 სამუშაო დღისა შვებულების პირველი დღიდან "
         f"({POLICY}, მუხლები 8.3 და 12.3).",
+        "ახლო ოჯახის წევრის (მეუღლე ან პარტნიორი, შვილი, მშობელი, და-ძმა) გარდაცვალებისას ეკუთვნის არაუმეტეს "
+        "3 სამუშაო დღის ანაზღაურებადი გლოვის შვებულება (მუხლი 8.1); ბებიის, ბაბუის, შვილიშვილის, მეუღლის მშობლისა "
+        "და მეუღლის და-ძმის გარდაცვალებისას — 1 სამუშაო დღე (მუხლი 8.2). შვებულება გამოიყენება გარდაცვალების "
+        "დღიდან 30 კალენდარული დღის განმავლობაში და ყოველწლიური შვებულების ბალანსს არ აკლდება (მუხლი 8.3).",
     ),
     "STUDY": (
         "სასწავლო და საგამოცდო შვებულება: რამდენი დღე ეკუთვნის, რა არის დამტკიცებული გეგმის მოთხოვნა და "
@@ -61,12 +67,19 @@ UNSUPPORTED_GUIDE = {
         "ამ მოთხოვნას ასისტენტი ვერ ქმნის და ვერ ადასტურებს, არის თუ არა გამოცდა თქვენს დამტკიცებულ სწავლისა და "
         "განვითარების გეგმაში — ამას HR ამოწმებს. მოთხოვნა წარადგინეთ HR პორტალით ან HR-ის მეშვეობით, დაწყებამდე "
         f"სულ მცირე 10 სამუშაო დღით ადრე ({POLICY}, მუხლები 9.2, 9.3 და 12.3).",
+        "შვებულების წელიწადში ეკუთვნის არაუმეტეს 5 სამუშაო დღის ანაზღაურებადი სასწავლო შვებულება დამტკიცებული "
+        "პროფესიული კვალიფიკაციის გამოცდებისთვის (მუხლი 9.1). კვალიფიკაცია თანამშრომლის სწავლისა და განვითარების "
+        "დამტკიცებულ წლიურ გეგმაში უნდა იყოს შეტანილი — მხოლოდ დასახელება საკმარისი არ არის (მუხლი 9.2). თითო "
+        "გამოცდაზე გამოიყენება გამოცდის დღე და მის წინ არაუმეტეს 1 სამუშაო დღე მოსამზადებლად (მუხლი 9.3).",
     ),
     "PARENTAL": (
         "მშობლის შვებულება: რას მოიცავს და როგორ წარდგება მოთხოვნა (მუხლები 10.1, 10.2, 10.3, 10.4)?",
         "მშობლის შვებულება HR პორტალით ან ასისტენტით არ წარდგება. მიმართეთ პირდაპირ ადამიანური რესურსების "
         "სამსახურს, არაუგვიანეს 8 კვირით ადრე სავარაუდო დაწყებამდე — ხანგრძლივობას, ანაზღაურებასა და "
         f"დოკუმენტებს HR თქვენთან ერთად განსაზღვრავს ({POLICY}, მუხლები 10.2 და 12.3).",
+        "მშობლის შვებულება მოიცავს დედობის, ბავშვის მოვლის, მამობის და შვილად აყვანის შვებულებას (მუხლი 10.1). "
+        "მამობის შვებულება 10 სამუშაო დღეა და გამოიყენება ბავშვის დაბადებიდან ან შვილად აყვანიდან 6 თვის "
+        "განმავლობაში (მუხლი 10.3).",
     ),
 }
 
@@ -339,7 +352,7 @@ class HRAgent:
         return AgentReply(text)
 
     async def _explain_unsupported(self, code: str) -> AgentReply:
-        question, redirect = UNSUPPORTED_GUIDE[code]
+        question, redirect, facts = UNSUPPORTED_GUIDE[code]
         self._reset_draft()
         prefix = "გულწრფელად გიზიარებთ მწუხარებას.\n\n" if code == "BEREAVEMENT" else ""
         try:
@@ -349,9 +362,10 @@ class HRAgent:
                             "არ თქვა, რომ მოთხოვნას შენ შექმნი.")
         except (LLMError, RagNotReady, EmbeddingError, SQLAlchemyError):
             logger.warning("policy explanation unavailable", exc_info=True)
-            return AgentReply(f"{prefix}{redirect}")
-        body = f"{answer.text}\n\n" if answer.found else ""
-        return AgentReply(f"{prefix}{body}{redirect}", answer.sources)
+            return AgentReply(f"{prefix}{facts}\n\n{redirect}", [POLICY])
+        if not answer.found:
+            return AgentReply(f"{prefix}{facts}\n\n{redirect}", [POLICY])
+        return AgentReply(f"{prefix}{answer.text}\n\n{redirect}", answer.sources)
 
     async def _confirm(self) -> AgentReply:
         """Create exactly the shown proposal. Nothing is ever created without a fresh, explicit "yes"."""

@@ -30,7 +30,8 @@ SYSTEM = f"""\
 6. წერე უბრალო ტექსტით ტერმინალისთვის: Markdown-ს (**, #, `) ნუ გამოიყენებ; ჩამონათვალისთვის გამოიყენე „• “.
 """
 
-_CITE_RE = re.compile(r"\[(\d{1,2})\]")
+# [1], [1, 3] or [1,2,3] — models sometimes group several passage numbers in one bracket.
+_CITE_RE = re.compile(r"\[(\d{1,2}(?:\s*,\s*\d{1,2})*)\]")
 
 
 @dataclass
@@ -61,7 +62,8 @@ class PolicyAnswerer:
         text = (await self.llm.generate_text(SYSTEM, prompt, on_chunk=on_chunk)).strip()
         if not text or NO_INFO in text:
             return PolicyAnswer(NO_INFO, [], found=False)
-        cited = [int(n) for n in _CITE_RE.findall(text) if 1 <= int(n) <= len(result.passages)]
+        cited = [int(n) for group in _CITE_RE.findall(text) for n in group.split(",")
+                 if 1 <= int(n) <= len(result.passages)]
         numbers = list(dict.fromkeys(cited))
         if numbers:
             sources = [f"[{n}] {result.passages[n - 1].citation}" for n in numbers]

@@ -132,10 +132,12 @@ def test_ambiguous_request_asks_type_then_keeps_state(talk, seeded_engine):
 
 def test_vague_rest_wording_is_clarified(talk):
     m = "დასვენება მინდა."
-    llm = FakeLLM({m: X("CREATE_LEAVE_REQUEST", leave_type="ANNUAL", leave_type_explicit=False)})
-    (r1, r2), _ = talk(llm, m, "დიახ")
-    assert "ყოველწლიური ანაზღაურებადი შვებულება გსურთ? (დიახ/არა)" in r1.text
-    assert "რომელი თარიღებით" in r2.text
+    llm = FakeLLM({m: X("CREATE_LEAVE_REQUEST", leave_type="ANNUAL", leave_type_explicit=False),
+                   "ყოველწლიური": X("PROVIDE_DETAILS", leave_type="ANNUAL", leave_type_explicit=True)})
+    (r1, r2, r3), agent = talk(llm, m, "დიახ", "ყოველწლიური")
+    assert r1.text.startswith("რა ტიპის შვებულება გსურთ?") and "(დიახ/არა)" not in r1.text
+    assert r2.text.startswith("რა ტიპის შვებულება გსურთ?")   # "yes" is not a type: ask again
+    assert "რომელი თარიღებით" in r3.text and agent.state.draft.leave_type == "ANNUAL"
 
 
 # --- Scenario 3: unpaid ----------------------------------------------------------------------------

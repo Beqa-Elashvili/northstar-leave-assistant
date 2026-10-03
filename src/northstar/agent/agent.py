@@ -22,6 +22,8 @@ from dataclasses import dataclass, field
 from datetime import date
 from enum import StrEnum
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from northstar.agent.formatting import (
     POLICY,
     format_balances,
@@ -35,6 +37,7 @@ from northstar.agent.intents import Intent, IntentExtraction, build_system_promp
 from northstar.agent.llm import LLMError, LLMProvider
 from northstar.agent.policy_qa import PolicyAnswerer
 from northstar.agent.tools import McpLeaveTools, ToolFailure
+from northstar.rag.embeddings import EmbeddingError
 from northstar.rag.retrieval import RagNotReady
 
 logger = logging.getLogger("northstar.agent")
@@ -155,6 +158,10 @@ class HRAgent:
         self.tools.calls.clear()
         return profile
 
+    def reset(self) -> None:
+        """Start a new conversation (new conversation_id); any shown proposal is simply left to expire."""
+        self.state = ConversationState(employee_id=self.state.employee_id, employee_name=self.state.employee_name)
+
     # --- entry point ------------------------------------------------------------------------------
 
     async def handle(self, message: str, on_chunk: Callable[[str], None] | None = None) -> AgentReply:
@@ -170,6 +177,12 @@ class HRAgent:
         except RagNotReady:
             reply = AgentReply("პოლიტიკის დოკუმენტების საძიებო ბაზა მზად არ არის. ადმინისტრატორმა უნდა გაუშვას: "
                                "python -m scripts.ingest_documents")
+        except EmbeddingError:
+            logger.warning("embedding service unavailable", exc_info=True)
+            reply = AgentReply("პოლიტიკის დოკუმენტებში ძიება ამ წუთას მიუწვდომელია. სცადეთ ცოტა ხანში.")
+        except SQLAlchemyError:
+            logger.warning("document store unavailable", exc_info=True)
+            reply = AgentReply("დოკუმენტების ბაზასთან კავშირი ვერ მოხერხდა. სცადეთ ცოტა ხანში.")
         except Exception:
             logger.exception("unexpected agent error")
             reply = AgentReply("ბოდიში, მოულოდნელი შეცდომა მოხდა. სცადეთ თავიდან.")
@@ -187,12 +200,11 @@ class HRAgent:
             yes = bool(_YES.match(message))
             if s.awaiting == Awaiting.CONFIRMATION and s.proposal_id:
                 return await (self._confirm() if yes else self._decline())
-            if s.awaiting == Awaiting.LEAVE_TYPE and s.draft and s.draft.leave_type:
-                if yes:
-                    s.draft.type_confirmed = True
-                    return await self._advance()
-                s.draft.leave_type = None
-                return self._ask(Awaiting.LEAVE_TYPE, ASK_TYPE)
+            if s.awaiting == Awaiting.LEAVE_TYPE:
+                if yes:  # "yes" is not a leave type
+                    return self._ask(Awaiting.LEAVE_TYPE, ASK_TYPE)
+                self._reset_draft()
+                return AgentReply("კარგი. სხვა რით შემიძლია დაგეხმაროთ?")
             if s.awaiting == Awaiting.SICK_KNOWN and s.draft:
                 if yes:
                     s.draft.period_known_in_advance = True
@@ -292,8 +304,9 @@ class HRAgent:
         info = self.leave_types.get(d.leave_type, {})
         if not info.get("assistant_supported", False):
             return await self._explain_unsupported(d.leave_type)
-        if not d.type_confirmed:
-            return self._ask(Awaiting.LEAVE_TYPE, f"{type_name(d.leave_type)} გსურთ? (დიახ/არა)\n\n{ASK_TYPE}")
+        if not d.type_confirmed:  # a guess from vague wording ("შვებულება", "დასვენება") is not a choice
+            d.leave_type = None
+            return self._ask(Awaiting.LEAVE_TYPE, ASK_TYPE)
         if d.leave_type == "UNPAID" and not d.reason:
             return self._ask(Awaiting.REASON, "მოკლედ გთხოვთ მიუთითოთ მიზეზი (ჯანმრთელობის დეტალების გარეშე).")
         if d.start_date is None:
@@ -334,7 +347,8 @@ class HRAgent:
                 question, topic="leave",
                 instruction="მოკლედ ახსენი მხოლოდ ამ შვებულების წესები. პირადი ან ჯანმრთელობის დეტალებს ნუ ითხოვ. "
                             "არ თქვა, რომ მოთხოვნას შენ შექმნი.")
-        except (LLMError, RagNotReady):
+        except (LLMError, RagNotReady, EmbeddingError, SQLAlchemyError):
+            logger.warning("policy explanation unavailable", exc_info=True)
             return AgentReply(f"{prefix}{redirect}")
         body = f"{answer.text}\n\n" if answer.found else ""
         return AgentReply(f"{prefix}{body}{redirect}", answer.sources)

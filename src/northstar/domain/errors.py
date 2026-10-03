@@ -41,3 +41,33 @@ class NoBalanceForLeaveType(DomainError):
 
 class EntitlementNotFound(DomainError):
     code = "entitlement_not_found"
+
+
+class PermissionDenied(DomainError):
+    code = "permission_denied"
+
+
+class AuthenticationError(DomainError):
+    code = "authentication_error"
+
+
+class RequestNotFound(DomainError):
+    code = "request_not_found"
+
+
+class InvalidStatusTransition(DomainError):
+    code = "invalid_status_transition"
+
+
+class ProposalNotFound(DomainError):
+    code = "proposal_not_found"
+
+
+class ProposalNotConfirmable(DomainError):
+    code = "proposal_not_confirmable"
+
+
+class ProposalRulesChanged(DomainError):
+    """The proposal no longer satisfies the rules at confirmation time (details carry the violations)."""
+
+    code = "proposal_rules_changed"

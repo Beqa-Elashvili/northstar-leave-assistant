@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "northstar-hr": {
+      "command": "northstar-mcp",
+      "env": { "MCP_ROLE": "hr", "DEMO_EMPLOYEE_ID": "E1007" }
+    },
+    "northstar-employee": {
+      "command": "northstar-mcp",
+      "env": { "MCP_ROLE": "employee", "DEMO_EMPLOYEE_ID": "E1001" }
+    }
+  }
+}

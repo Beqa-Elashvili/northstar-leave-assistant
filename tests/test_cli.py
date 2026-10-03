@@ -212,3 +212,12 @@ def test_cli_unreachable_database_fails_safely():
     assert result.returncode == 2
     assert "მონაცემთა ბაზასთან კავშირი ვერ მოხერხდა" in result.stdout
     assert "secret-password" not in result.stdout + result.stderr and "Traceback" not in result.stdout + result.stderr
+
+
+@pytest_db
+def test_cli_session_is_always_employee_even_if_mcp_role_is_set(seeded_engine, db_url, db_schema):
+    """MCP_ROLE=hr in the environment must not turn the employee assistant into an HR session."""
+    result = cli(db_url, db_schema, "--employee-id", "E1007", MCP_ROLE="hr")
+    assert result.returncode == 0 and "E1007" in result.stdout
+    from northstar.cli.app import server_parameters
+    assert server_parameters("E1007").args[2:4] == ["--role", "employee"]

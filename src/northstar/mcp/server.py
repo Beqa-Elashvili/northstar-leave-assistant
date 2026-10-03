@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 import uuid
 from collections.abc import Callable
@@ -197,10 +198,16 @@ def build_server(
 
 def principal_from_args(argv: list[str] | None = None) -> Principal:
     parser = argparse.ArgumentParser(description="Northstar leave MCP server (stdio)")
-    parser.add_argument("--role", choices=[r.value for r in Role], default=Role.EMPLOYEE.value)
+    # MCP_ROLE lets MCP clients that only pass environment variables (Inspector, desktop apps) choose the
+    # role; like DEMO_EMPLOYEE_ID it is a local-development identity, not authentication.
+    parser.add_argument("--role", choices=[r.value for r in Role],
+                        default=os.environ.get("MCP_ROLE", Role.EMPLOYEE.value).strip().lower() or Role.EMPLOYEE.value,
+                        help="default: MCP_ROLE environment variable, else employee")
     parser.add_argument("--employee-id", default=None,
                         help="identity of the caller; default DEMO_EMPLOYEE_ID (local development only)")
     args = parser.parse_args(argv)
+    if args.role not in {r.value for r in Role}:  # argparse does not validate defaults (MCP_ROLE)
+        parser.error(f"invalid MCP_ROLE {args.role!r} (expected employee or hr)")
     employee_id = (args.employee_id or get_settings().demo_employee_id or "").strip().upper()
     if not employee_id:
         parser.error("no identity: pass --employee-id or set DEMO_EMPLOYEE_ID")
@@ -219,7 +226,18 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:  # never echo connection strings
         print(f"MCP server: database unavailable ({type(exc).__name__})", file=sys.stderr)
         return 2
-    build_server(principal).run("stdio")
+    if sys.stdin.isatty():
+        # Started by hand in a terminal: stdio is the MCP protocol channel, so nothing will happen
+        # until an MCP client connects. Say so on stderr (stdout belongs to the protocol).
+        print(f"MCP server ready ({principal.role.value} {principal.employee_id}) on stdio. It waits for an MCP "
+              "client and prints nothing itself.\nTry it with: npx @modelcontextprotocol/inspector "
+              f"-e MCP_ROLE={principal.role.value} -e DEMO_EMPLOYEE_ID={principal.employee_id} northstar-mcp"
+              "\nStop with Ctrl+C.",
+              file=sys.stderr)
+    try:
+        build_server(principal).run("stdio")
+    except KeyboardInterrupt:
+        pass  # normal way to stop a server started by hand
     return 0
 
 

@@ -53,3 +53,36 @@ def test_stdio_rejects_unknown_identity(seeded_engine, db_url, db_schema):
                           capture_output=True, text=True, encoding="utf-8", timeout=60)
     assert proc.returncode == 2
     assert "postgresql://" not in proc.stderr  # never leaks the connection string
+
+
+def test_role_and_identity_from_environment(seeded_engine, db_url, db_schema):
+    """MCP clients that only pass environment variables (examples/mcp.json) can start an HR session."""
+    params = server_params(db_url, db_schema)
+    params.env.update({"MCP_ROLE": "hr", "DEMO_EMPLOYEE_ID": "E1007"})
+
+    async def go():
+        async with Client(params) as client:
+            profile = (await client.call_tool("get_my_profile", {})).structured_content
+            other = (await client.call_tool("get_leave_balance", {"employee_id": "E1002", "leave_type": "ANNUAL"}))
+            return profile, other.structured_content
+
+    profile, other = anyio.run(go)
+    assert profile["employee_id"] == "E1007" and other["balances"][0]["available_days"] == 4
+
+
+def test_invalid_role_in_environment_is_refused_cleanly(seeded_engine, db_url, db_schema):
+    import subprocess
+
+    params = server_params(db_url, db_schema)
+    params.env["MCP_ROLE"] = "admin"
+    proc = subprocess.run([params.command, *params.args], env=params.env, cwd=params.cwd, input="",
+                          capture_output=True, text=True, encoding="utf-8", timeout=60)
+    assert proc.returncode == 2 and "invalid MCP_ROLE" in proc.stderr and "Traceback" not in proc.stderr
+
+
+def test_example_client_config_is_valid():
+    import json
+
+    config = json.loads((ROOT / "examples" / "mcp.json").read_text(encoding="utf-8"))["mcpServers"]
+    assert config["northstar-hr"]["env"] == {"MCP_ROLE": "hr", "DEMO_EMPLOYEE_ID": "E1007"}
+    assert config["northstar-employee"]["env"]["MCP_ROLE"] == "employee"

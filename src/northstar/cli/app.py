@@ -98,7 +98,7 @@ def server_parameters(employee_id: str) -> StdioServerParameters:
     src = str(Path(northstar.__file__).resolve().parents[1])  # works without `pip install` too
     env["PYTHONPATH"] = os.pathsep.join(p for p in (src, env.get("PYTHONPATH")) if p)
     return StdioServerParameters(command=sys.executable,
-                                 args=["-m", "northstar.mcp.server", "--employee-id", employee_id],
+                                 args=["-m", "northstar.mcp.server", "--role", "employee", "--employee-id", employee_id],
                                  env=env, cwd=str(PROJECT_ROOT))
 
 

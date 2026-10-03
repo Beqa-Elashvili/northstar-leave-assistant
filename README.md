@@ -59,7 +59,7 @@ northstar-cli
 ```
 - გამოჩნდება „Northstar Services HR Assistant — E1001, ნინო ბერიძე“. `თქვენ:`-ის შემდეგ ქართულად წერთ.
 - ბრძანებები: `/new` — ახალი საუბარი, `/help` — დახმარება, `/exit` — გასვლა.
-- სხვა თანამშრომლად შესასვლელად: `northstar-cli --employee-id E1004`.
+- სხვა თანამშრომლად შესასვლელად: ``.
 
 ### 6. რა შეამოწმოთ (დავალების სცენარები)
 
@@ -81,13 +81,28 @@ northstar-cli
 | 14 | `რა არის პოლიტიკა შინაური ცხოველების ოფისში მოყვანაზე?` | „…საკმარისი ინფორმაცია ვერ მოიძებნა.“ |
 | 15 | `რამდენი დღე შემიძლია ვიმუშაო სახლიდან კვირაში?` | **2 დღე**, ახალი პოლიტიკით: მოძველებული FAQ-ის 3 დღე არ გამოიყენება |
 
-### 7. ავტომატური ტესტები
+### 7. HR-ის ფუნქციების შემოწმება (დამტკიცება, უარყოფა, გაუქმება)
+CLI თანამშრომლის ასისტენტია და HR-ის ქმედებებს ვერ ასრულებს: ეს დავალების მოთხოვნაა. „HR პორტალი“ კომპანიის გარე სისტემაა და ამ პროექტში არ არსებობს.
+
+HR-ის ფუნქციები MCP ხელსაწყოებია. მათ შესამოწმებლად საჭიროა Node.js. გაუშვით:
+```
+npx @modelcontextprotocol/inspector --config examples/mcp.json --server northstar-hr
+```
+ბრაუზერში დააჭირეთ **Connect** → **Tools** → **List Tools** და სცადეთ:
+- `get_leave_balance` (`employee_id` = `E1002`) → HR სხვის ბალანსს ხედავს;
+- `approve_leave_request` (`request_id` = `5`) → `approved`;
+- `reject_leave_request` → მიზეზი სავალდებულოა;
+- `cancel_leave_request`.
+
+იგივე `--server northstar-employee`-ით სცადეთ: დამტკიცებაზე პასუხი `permission_denied` იქნება.
+
+### 8. ავტომატური ტესტები
 ```
 python -m pytest
 ```
 შედეგი: ყველა ტესტი გადის (`passed`). Gemini-ის გასაღები და ინტერნეტი არ სჭირდება.
 
-### 8. მონაცემების საწყის მდგომარეობაში დაბრუნება
+### 9. მონაცემების საწყის მდგომარეობაში დაბრუნება
 ტესტირების დროს შექმნილი მოთხოვნები ბაზაში რჩება. თავიდან დასაწყებად:
 ```
 python -m scripts.seed_database --reset
@@ -140,7 +155,7 @@ what they want:
 Bereavement, study and parental leave are explained and redirected to the HR portal or HR, as the
 policy requires. Cancelling, changing or approving existing requests is refused.
 
-The supplied data describes the company on **2026-10-19**. All date rules use this business date
+The supplied data describes the company on **2026-10-19**. All date rulnorthstar-cli --employee-id E1004es use this business date
 (`APP_TODAY`) instead of the machine clock.
 
 ## Architecture
@@ -335,30 +350,40 @@ python -m scripts.check_setup
 ## MCP server
 
 The CLI starts the MCP server automatically as a subprocess over stdio, so you do not need to start
-it yourself. To use it from another MCP client:
+it yourself. Other MCP clients start it like this:
 
 ```bash
-northstar-mcp --employee-id E1001          # employee session (default: DEMO_EMPLOYEE_ID)
+northstar-mcp --employee-id E1001             # employee session (default: DEMO_EMPLOYEE_ID)
 northstar-mcp --role hr --employee-id E1007   # HR session (E1007 is in the HR department)
 # equivalent: python -m northstar.mcp.server [--role employee|hr] [--employee-id EXXXX]
 ```
 
-Example client configuration (e.g. Claude Desktop / MCP Inspector):
+The identity can also come from environment variables, which is what most MCP clients pass:
+- `MCP_ROLE` = `employee` | `hr`;
+- `DEMO_EMPLOYEE_ID`.
 
-```json
-{
-  "mcpServers": {
-    "northstar-leave": {
-      "command": "python",
-      "args": ["-m", "northstar.mcp.server", "--employee-id", "E1001"],
-      "cwd": "/path/to/northstar-leave-assistant"
-    }
-  }
-}
+Both are development identities, not authentication. The CLI always starts its server with
+`--role employee`.
+
+Started by hand in a terminal, the server prints a short hint on stderr and then waits silently,
+because stdio is the MCP protocol channel. Stop it with Ctrl+C.
+
+**Trying the HR tools with the MCP Inspector** (needs Node.js). [`examples/mcp.json`](examples/mcp.json)
+defines an HR session (E1007) and an employee session (E1001):
+
+```bash
+# browser UI: click Connect, then Tools -> List Tools
+npx @modelcontextprotocol/inspector --config examples/mcp.json --server northstar-hr
+
+# or a single call from the terminal
+npx @modelcontextprotocol/inspector --cli --config examples/mcp.json --server northstar-hr --method tools/call --tool-name get_leave_balance --tool-arg employee_id=E1002 --tool-arg leave_type=ANNUAL
 ```
 
-The server refuses to start (exit code 2) when the identity is unknown, inactive, or not in the HR
-department for `--role hr`.
+The same file works for desktop MCP clients such as Claude Desktop, under `mcpServers`.
+
+The server refuses to start (exit code 2) when:
+- the identity is unknown or inactive;
+- `--role hr` / `MCP_ROLE=hr` is given for an employee outside the HR department.
 
 ## CLI
 
@@ -383,7 +408,7 @@ go to `logs/northstar-cli.log` and `logs/mcp-server.log`.
 python -m pytest
 ```
 
-The suite has 389 tests. It needs **no Gemini key and no network**:
+The suite has 393 tests. It needs **no Gemini key and no network**:
 - the LLM is mocked and the embeddings are local;
 - the MCP server, the business rules, the SQL and the RAG retrieval are real.
 

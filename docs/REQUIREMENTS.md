@@ -39,7 +39,7 @@ project and Gemini (see the end-to-end section in the README).
 | 29 | Confirmation before creation | proposals + explicit "დიახ" (`_YES`/`_NO`, no LLM) | `test_scenarios.py::test_scenario_2_annual_request` (count before/after), `test_agent.py::test_nothing_created_before_confirmation`, `::test_decline_creates_nothing` | ✅ |
 | 30 | Duplicate confirmation protection | `leave_proposals`, `SELECT … FOR UPDATE`, `UNIQUE(proposal_id)` | `test_scenarios.py::test_scenario_10_duplicate_confirmation`, `test_mcp_server.py::test_concurrent_confirmations_create_one_request`, `test_schema.py::test_one_request_per_proposal` | ✅ |
 | 31 | Business-rule validation | `policies/rules.py`, `services/day_calculator.py`, `services/leave_rules.py` | `test_rules.py` (45 tests), `test_day_calculator.py`, `test_leave_rule_service.py`, `test_scenarios.py::test_scenario_2_every_rule_is_checked` | ✅ |
-| 32 | Tests | `tests/` (389 tests, LLM mocked, no key needed) | `python -m pytest`; map: `docs/TESTING.md` | ✅ |
+| 32 | Tests | `tests/` (393 tests, LLM mocked, no key needed) | `python -m pytest`; map: `docs/TESTING.md` | ✅ |
 | 33 | README | `README.md` (all section 52 headings) | Manual review; followed during the end-to-end test | ✅ |
 | 34 | `.env.example` | `.env.example` (all variables, no values for secrets) | `test_repository_hygiene.py::test_env_example_has_no_secret_values` | ✅ |
 | 35 | `.gitignore` | `.gitignore` | `test_repository_hygiene.py::test_gitignore_excludes_env_and_caches` | ✅ |

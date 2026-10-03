@@ -139,7 +139,8 @@ class ChatSession:
     async def run(self) -> None:
         while True:
             try:
-                message = self.ui.ask().strip()
+                # PowerShell may prefix piped input with a BOM; it is not part of the message.
+                message = self.ui.ask().replace("﻿", "").strip()
             except (EOFError, KeyboardInterrupt):
                 self.ui.info(f"\n{GOODBYE}")
                 return

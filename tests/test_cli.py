@@ -140,7 +140,7 @@ def run_session(engine, retriever, llm, inputs, stream=True):
 def test_session_commands_and_turns(seeded_engine, retriever):
     q = "რამდენი დღე დამრჩა?"
     llm = FakeLLM({q: X("BALANCE_QUERY")})
-    text, agent, first = run_session(seeded_engine, retriever, llm, ["", "/help", q, "/foo", "/new", "/exit", q])
+    text, agent, first = run_session(seeded_engine, retriever, llm, ["", "/help", q, "/foo", "/new", "﻿/exit", q])
     assert "ბრძანებები:" in text and "უცნობი ბრძანება" in text and "დაიწყო ახალი საუბარი" in text
     assert "ხელსაწყო: get_leave_balance" in text and "ხელმისაწვდომი: 10 სამუშაო დღე" in text
     assert agent.state.conversation_id != first and agent.state.employee_id == "E1001"

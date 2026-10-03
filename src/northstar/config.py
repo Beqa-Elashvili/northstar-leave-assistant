@@ -21,7 +21,7 @@ DOCUMENTS_DIR = PROJECT_ROOT / "documents"
 MIGRATIONS_DIR = PROJECT_ROOT / "migrations"
 
 _EMPLOYEE_ID_RE = re.compile(r"^E\d{4}$")
-_SCHEMA_RE = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")
+SCHEMA_RE = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")  # schema names are interpolated into SQL: keep strict
 
 
 class Settings(BaseSettings):
@@ -70,7 +70,7 @@ class Settings(BaseSettings):
     @field_validator("db_schema")
     @classmethod
     def _valid_schema(cls, value: str) -> str:
-        if not _SCHEMA_RE.fullmatch(value):
+        if not SCHEMA_RE.fullmatch(value):
             raise ValueError("DB_SCHEMA must be a lowercase SQL identifier")
         return value
 

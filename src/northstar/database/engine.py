@@ -13,10 +13,18 @@ from sqlalchemy import Engine, create_engine, event
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session, sessionmaker
 
-from northstar.config import get_settings, require_database_url
+from northstar.config import SCHEMA_RE, get_settings, require_database_url
+
+
+def validate_schema(schema: str) -> str:
+    """Schema names cannot be bound as SQL parameters, so only plain identifiers are accepted."""
+    if not SCHEMA_RE.fullmatch(schema):
+        raise ValueError("invalid schema name (expected a lowercase SQL identifier)")
+    return schema
 
 
 def search_path_for(schema: str) -> str:
+    validate_schema(schema)
     # `extensions` is where Supabase installs pgvector; harmless if it does not exist.
     parts = [schema, "public", "extensions"]
     return ", ".join(dict.fromkeys(f'"{p}"' for p in parts))

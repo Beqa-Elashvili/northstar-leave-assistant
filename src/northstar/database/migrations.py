@@ -14,7 +14,7 @@ from pathlib import Path
 from sqlalchemy import Engine, text
 
 from northstar.config import MIGRATIONS_DIR
-from northstar.database.engine import search_path_for
+from northstar.database.engine import search_path_for, validate_schema
 
 
 class MigrationError(RuntimeError):
@@ -41,6 +41,7 @@ def load_migrations(directory: Path = MIGRATIONS_DIR) -> list[Migration]:
 
 def apply_migrations(engine: Engine, schema: str, directory: Path = MIGRATIONS_DIR) -> list[str]:
     """Create the schema if needed and apply pending migrations. Returns the names applied."""
+    validate_schema(schema)
     migrations = load_migrations(directory)
     with engine.begin() as conn:
         conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema}"'))
@@ -66,7 +67,9 @@ def apply_migrations(engine: Engine, schema: str, directory: Path = MIGRATIONS_D
             # Unqualified names in the migration must land in the target schema,
             # regardless of the connection's default search_path.
             conn.exec_driver_sql(f"SET LOCAL search_path TO {search_path_for(schema)}")
-            conn.exec_driver_sql(migration.sql)
+            # Raw DBAPI cursor without parameters: '%' in SQL files (e.g. format('%I')) is taken literally.
+            with conn.connection.cursor() as cursor:
+                cursor.execute(migration.sql)
             conn.execute(
                 text(f'INSERT INTO "{schema}".schema_migrations (name, checksum) VALUES (:n, :c)'),
                 {"n": migration.name, "c": migration.checksum},

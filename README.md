@@ -575,3 +575,4 @@ Where the supplied files leave something open, the implementation chooses the co
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — layers, schema, role model
 - [docs/SECURITY.md](docs/SECURITY.md) — security review
 - [docs/TESTING.md](docs/TESTING.md) — test map
+- [docs/E2E_VERIFICATION.md](docs/E2E_VERIFICATION.md) — clean-environment end-to-end run (section 57)

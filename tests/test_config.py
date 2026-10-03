@@ -80,7 +80,7 @@ def test_missing_database_url_gives_safe_error():
 
 def test_defaults():
     s = make()
-    assert s.gemini_model == "gemini-3.8-flash"
+    assert s.gemini_model == "gemini-3.5-flash-lite"
     assert s.embedding_model == "gemini-embedding-001"
     assert s.embedding_dim == 768
     assert s.db_schema == "public"

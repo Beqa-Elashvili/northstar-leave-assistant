@@ -43,9 +43,9 @@ class Settings(BaseSettings):
     supabase_service_role_key: SecretStr | None = Field(default=None, alias="SUPABASE_SERVICE_ROLE_KEY")
 
     gemini_api_key: SecretStr | None = Field(default=None, alias="GEMINI_API_KEY")
-    gemini_model: str = Field(default="gemini-3.8-flash", alias="GEMINI_MODEL")
+    gemini_model: str = Field(default="gemini-3.5-flash-lite", alias="GEMINI_MODEL")
     # Tried in order when the primary model is overloaded (HTTP 503/429) or unavailable to the key.
-    gemini_fallback_models: str = Field(default="gemini-flash-latest,gemini-3.5-flash-lite",
+    gemini_fallback_models: str = Field(default="gemini-flash-lite-latest,gemini-3.1-flash-lite",
                                         alias="GEMINI_FALLBACK_MODELS")
     gemini_thinking_level: Literal["LOW", "MEDIUM", "HIGH"] = Field(default="LOW", alias="GEMINI_THINKING_LEVEL")
     embedding_provider: Literal["gemini", "local"] = Field(default="gemini", alias="EMBEDDING_PROVIDER")

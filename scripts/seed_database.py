@@ -10,7 +10,9 @@ from __future__ import annotations
 import argparse
 import sys
 
-from northstar.config import DATA_DIR, ConfigurationError, get_settings
+from pydantic import ValidationError
+
+from northstar.config import DATA_DIR, ConfigurationError, get_settings, invalid_settings_message
 from northstar.database.csv_loader import CsvValidationError, load_seed_data
 from northstar.database.engine import get_engine
 from northstar.database.migrations import MigrationError, apply_migrations
@@ -30,6 +32,9 @@ def main(argv: list[str] | None = None) -> int:
         summary = seed_database(engine, data, reset=args.reset)
     except (ConfigurationError, MigrationError, CsvValidationError) as exc:
         print(f"Seeding failed: {exc}", file=sys.stderr)
+        return 1
+    except ValidationError as exc:
+        print(f"Seeding failed: {invalid_settings_message(exc)}", file=sys.stderr)
         return 1
     except Exception as exc:  # never print connection strings
         print(f"Seeding failed: {type(exc).__name__}. Check DATABASE_URL and network access.", file=sys.stderr)

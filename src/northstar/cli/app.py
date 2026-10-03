@@ -216,7 +216,7 @@ def main(argv: list[str] | None = None) -> int:
         settings = get_settings()
     except ValidationError as exc:
         fields = sorted({str(err["loc"][0]) for err in exc.errors() if err.get("loc")})
-        ui.error(f"კონფიგურაციის შეცდომა .env ფაილში: {', '.join(fields)}")
+        ui.error(f"კონფიგურაციის შეცდომა .env ფაილში: {', '.join(fields)} (იხ. .env.example)")
         return 2
     employee_id = (args.employee_id or settings.demo_employee_id or "").strip().upper()
     if not employee_id:

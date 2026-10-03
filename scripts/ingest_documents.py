@@ -10,7 +10,9 @@ from __future__ import annotations
 import argparse
 import sys
 
-from northstar.config import DOCUMENTS_DIR, ConfigurationError, get_settings
+from pydantic import ValidationError
+
+from northstar.config import DOCUMENTS_DIR, ConfigurationError, get_settings, invalid_settings_message
 from northstar.database.engine import get_engine, get_session_factory
 from northstar.database.migrations import MigrationError, apply_migrations
 from northstar.rag.embeddings import EmbeddingError, get_embedding_provider
@@ -29,6 +31,9 @@ def main(argv: list[str] | None = None) -> int:
         report = ingest_documents(get_session_factory(), provider, DOCUMENTS_DIR, force=args.force, log=print)
     except (ConfigurationError, MigrationError, EmbeddingError) as exc:
         print(f"Ingestion failed: {exc}", file=sys.stderr)
+        return 1
+    except ValidationError as exc:
+        print(f"Ingestion failed: {invalid_settings_message(exc)}", file=sys.stderr)
         return 1
     except Exception as exc:  # never print connection strings or keys
         print(f"Ingestion failed: {type(exc).__name__}. Check DATABASE_URL / network access.", file=sys.stderr)

@@ -84,3 +84,25 @@ def test_defaults():
     assert s.embedding_model == "gemini-embedding-001"
     assert s.embedding_dim == 768
     assert s.db_schema == "public"
+
+
+@pytest.mark.parametrize("script", ["scripts.migrate", "scripts.seed_database", "scripts.check_setup"])
+def test_scripts_name_the_invalid_setting_without_its_value(script):
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    env = dict(os.environ, APP_TIMEZONE="Mars/Olympus_Mons", DATABASE_URL="postgresql://u:pw-secret@127.0.0.1:1/x",
+               PYTHONPATH=str(root / "src"), PYTHONIOENCODING="utf-8")
+    result = subprocess.run([sys.executable, "-m", script], env=env, cwd=root, capture_output=True, text=True,
+                            encoding="utf-8", timeout=60)
+    out = result.stdout + result.stderr
+    assert result.returncode == 1
+    assert "invalid value in .env for APP_TIMEZONE" in out
+    assert "pw-secret" not in out and "Traceback" not in out
+
+
+def test_time_zone_data_is_available():
+    assert ZoneInfo("Asia/Tbilisi").key == "Asia/Tbilisi"   # needs the tzdata package on Windows

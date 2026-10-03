@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from pydantic import ValidationError
 from sqlalchemy import func, select, text
 
-from northstar.config import Settings, get_settings
+from northstar.config import Settings, get_settings, invalid_settings_message
 from northstar.database.engine import get_session_factory, session_scope
 from northstar.database.migrations import load_migrations
 from northstar.database.models import Employee, LeaveEntitlement, LeaveRequest, LeaveType, PublicHoliday
@@ -147,8 +147,7 @@ def main() -> int:
     try:
         settings = get_settings()
     except ValidationError as exc:
-        fields = sorted({str(e["loc"][0]) for e in exc.errors() if e.get("loc")})
-        print(f"✗ Configuration: invalid values in .env for {', '.join(fields)}")
+        print(f"✗ Configuration: {invalid_settings_message(exc)}")
         return 1
     checks = run_checks(settings)
     for c in checks:

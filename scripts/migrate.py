@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import sys
 
-from northstar.config import ConfigurationError, get_settings
+from pydantic import ValidationError
+
+from northstar.config import ConfigurationError, get_settings, invalid_settings_message
 from northstar.database.engine import get_engine
 from northstar.database.migrations import MigrationError, apply_migrations
 
@@ -19,6 +21,9 @@ def main() -> int:
         applied = apply_migrations(get_engine(), settings.db_schema)
     except (ConfigurationError, MigrationError) as exc:
         print(f"Migration failed: {exc}", file=sys.stderr)
+        return 1
+    except ValidationError as exc:
+        print(f"Migration failed: {invalid_settings_message(exc)}", file=sys.stderr)
         return 1
     except Exception as exc:  # connection problems etc.; never print the URL
         print(f"Migration failed: {type(exc).__name__}. Check DATABASE_URL and network access.", file=sys.stderr)

@@ -143,6 +143,16 @@ Then create the configuration file and fill it in as described under [Environmen
 cp .env.example .env        # Windows (cmd): copy .env.example .env
 ```
 
+### Troubleshooting
+
+- **Windows: `DLL load failed … The filename or extension is too long`.** The project path is too long
+  for the Windows 260-character path limit inside `.venv`. Clone it into a short path (for example
+  `C:\src
+orthstar`), or enable Windows long paths.
+- **`invalid value in .env for X`.** The named variable has an invalid value; compare it with
+  `.env.example`.
+- **`python -m scripts.check_setup`** shows which setup step is missing.
+
 ## Environment variables
 
 All configuration is read from `.env` in the project root, or from the environment. `.env` is

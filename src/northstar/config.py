@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, ValidationError, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -106,6 +106,12 @@ class Settings(BaseSettings):
     @property
     def tz(self) -> ZoneInfo:
         return ZoneInfo(self.app_timezone)
+
+
+def invalid_settings_message(exc: ValidationError) -> str:
+    """Names the invalid .env variables only; pydantic messages may contain the (secret) values."""
+    fields = sorted({str(err["loc"][0]) for err in exc.errors() if err.get("loc")})
+    return f"invalid value in .env for {', '.join(fields)} (see .env.example)"
 
 
 class ConfigurationError(RuntimeError):

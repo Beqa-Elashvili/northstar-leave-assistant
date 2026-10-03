@@ -300,7 +300,7 @@ go to `logs/northstar-cli.log` and `logs/mcp-server.log`.
 python -m pytest
 ```
 
-The suite has 381 tests. It needs **no Gemini key and no network**:
+The suite has 389 tests. It needs **no Gemini key and no network**:
 - the LLM is mocked and the embeddings are local;
 - the MCP server, the business rules, the SQL and the RAG retrieval are real.
 
